@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import pytesseract
 from width_char_row.binarization import binarize
+import time
 OFFSET_ROW = 2
 BOLD_ROW = 1
 REGULAR_ROW = 0
@@ -12,6 +13,7 @@ COLOR_BOLD_ROW = (255, 0, 0)
 COLOR_OFFSET_ROW = (0, 0, 255)
 COLOR_REGULAR_ROW = (0, 255, 0)
 TEXT_IMG = 2
+
 
 class Pages:
     def __init__(self, imgs_path: str):
@@ -31,26 +33,103 @@ class Pages:
         count_row = 0
         precision = 0
         recall = 0
+        time_work = 0
+        cpu_work_time = 0
         for i in range(N):
             count_row_i_page = self.pages[i].get_count_row()
             count_row += count_row_i_page
+
+            start_time = time.time()
+            cpu_start_time = time.process_time()
             style_i_page = self.pages[i].get_type_rows(method=method, k=k)
+            end_time = time.time()
+            cpu_end_time = time.process_time()
+
             estimation_i_page = self.pages[i].estimation(style_i_page)
             precision += count_row_i_page*estimation_i_page["precision"]
             recall += count_row_i_page*estimation_i_page["recall"]
+
+            dt = end_time-start_time
+            cpu_dt = cpu_end_time-cpu_start_time
+            time_work += dt
+            cpu_work_time += cpu_dt
             if print_rez:
                 print('================================================')
                 print(self.name_pages[i])
-                print(estimation_i_page)
+                print(f"precision:{estimation_i_page['precision']:.4f}")
+                print(f"recall{estimation_i_page['recall']:.4f}")
+                print(f"Время работы:{dt:.4f} cек (CPU время:{cpu_dt:.4f} сек)")
                 print('================================================')
         if print_rez:
                 print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-                print("precision:", precision/count_row)
-                print("recall", recall/count_row)
+                print(f"precision: {precision/count_row:.4f}")
+                print(f"recall: {recall/count_row:.4f}")
+                print(f"Время работы:{time_work:.4f} cек (CPU время:{cpu_work_time:.4f} сек)")
                 print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         rez = {
             "precision": precision/count_row,
             "recall": recall/count_row
+        }
+        return rez
+
+    def test_proc_k(self, p, method="mean", print_rez=True):
+        coef = []
+        coef_pages = []
+        N = len(self.pages)
+        time_work = 0
+        cpu_work_time = 0
+        dt = []
+        cpu_dt = []
+        for i in range(N):
+            start_time = time.time()
+            cpu_start_time = time.process_time()
+
+            coef_i_page = self.pages[i].get_width_rows(method=method)
+
+            end_time = time.time()
+            cpu_end_time = time.process_time()
+            dt.append(end_time - start_time)
+            cpu_dt.append(cpu_end_time - cpu_start_time)
+            time_work += dt[-1]
+            cpu_work_time += cpu_dt[-1]
+
+            coef_pages.append(coef_i_page)
+            coef += coef_i_page
+
+        count_row = len(coef)
+        coef_rez = np.sort(coef)
+        index_k = round(p*count_row)-1
+        k = coef_rez[index_k]
+
+        precision = 0
+        recall = 0
+
+        for i in range(N):
+            count_row_i_page = len(coef_pages[i])
+            rez = np.array(coef_pages[i])
+            rez[rez < k] = 0
+            rez[rez >= k] = 1
+            style_i_page = self.pages[i].get_type_rows(1 - rez)
+            estimation_i_page = self.pages[i].estimation(style_i_page)
+            precision += count_row_i_page * estimation_i_page["precision"]
+            recall += count_row_i_page * estimation_i_page["recall"]
+            if print_rez:
+                print('================================================')
+                print(self.name_pages[i])
+                print(f"precision:{estimation_i_page['precision']:.4f}")
+                print(f"recall{estimation_i_page['recall']:.4f}")
+                print(f"Время работы:{dt[i]:.4f} cек (CPU время:{cpu_dt[i]:.4f} сек)")
+                print('================================================')
+        if print_rez:
+            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+            print(f"precision: {precision / count_row:.4f}")
+            print(f"recall: {recall / count_row:.4f}")
+            print(f"Время работы:{time_work:.4f} cек (CPU время:{cpu_work_time:.4f} сек)")
+            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+        rez = {
+            "k": k,
+            "precision": precision / count_row,
+            "recall": recall / count_row
         }
         return rez
 
@@ -147,11 +226,19 @@ class Page:
             recall = 1
         else:
             recall = min(1, bold_right/bold_all)
-        rez ={
+        rez = {
             "precision": precision,
             "recall": recall
         }
         return rez
+
+    def imshow_method(self, k, method):
+        coef = self.get_width_rows(method=method)
+        rez = np.array(coef)
+        rez[rez < k] = 0
+        rez[rez >= k] = 1
+        rez = 1-rez
+        self.imshow(rez, coef)
 
     def imshow(self, style, info_rows=None):
         h = self.img.shape[0]
@@ -226,7 +313,10 @@ class Row:
 
         elif method == "sq":
             img_chars = self.get_h_row()
-            return self._sq(img_chars, 6)
+            rez_sq = self._sq(img_chars, 6)
+            if rez_sq is None:
+                rez_sq = 0
+            return rez_sq
 
         elif method == "ps":
             img_chars = self.get_h_row()
@@ -262,7 +352,7 @@ class Row:
             y2 = round(y0+r/1.44)
             x1 = round(x0-r/1.44)
             x2 = round(x0+r/1.44)
-            if y2 > self.h or y1 < 0 or x2 > img.shape[1] or x1 < 0:
+            if y2 >= self.h or y1 < 0 or x2 >= img.shape[1] or x1 < 0:
                 rez_w.pop(index_max)
                 rez_cord.pop(index_max)
             elif img[y1, x1] == 1 or img[y1, x2] == 1 or img[y2, x1] == 1 or img[y2, x2] == 1:
