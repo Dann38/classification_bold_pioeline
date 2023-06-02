@@ -64,7 +64,7 @@ import numpy as np
 import cv2
 
 
-def binarize(image, N=1):
+def binarize(image, N=5):
     gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     c, x = np.histogram(gray_img, bins=255)
     h, w = gray_img.shape

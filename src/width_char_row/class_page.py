@@ -21,6 +21,9 @@ COLOR_REGULAR_ROW = (0, 255, 0)
 TEXT_IMG = 1.2
 T_BINARY = 200
 
+TYPE_LINE = 0
+TYPE_WORD = 1
+TYPE_LINE_WORD = 2
 
 class Pages:
     def __init__(self, imgs_path: str):
@@ -36,7 +39,7 @@ class Pages:
                     path_img = os.path.join(imgs_path, f)
                     self.pages.append(Page(path_img))
 
-    def test_method(self, method, k, print_rez=True, is_line=False):
+    def test_method(self, method, k, print_rez=True, type_stat=TYPE_LINE_WORD, binary_N=5):
         N = len(self.pages)
         count_word = 0
         precision = 0
@@ -49,7 +52,7 @@ class Pages:
 
             start_time = time.time()
             cpu_start_time = time.process_time()
-            self.pages[i].processing_method(method=method, k=k, line=is_line)
+            self.pages[i].processing_method(method=method, k=k, type_stat=type_stat, binary_N=binary_N)
             style_method = self.pages[i].style
             end_time = time.time()
             cpu_end_time = time.process_time()
@@ -231,9 +234,9 @@ class Page:
 
         return filtered_lines
 
-    def get_bold_coef_lines(self, method: str = "mean") -> List[List[float]]:
+    def get_bold_coef_lines(self, method: str = "mean", binary_N=5) -> List[List[float]]:
         coef_bold = []
-        binary_img = binarize(self.img)
+        binary_img = binarize(self.img, binary_N)
         for line in self.lines:
             coef_bold.append([])
             for word in line:
@@ -242,30 +245,35 @@ class Page:
                 coef_bold[-1].append(width_char.get_width_char_row(method=method))
         return coef_bold
 
-    def processing_method(self, k, method, line=False):
-        self.coef = self.get_bold_coef_lines(method=method)
+    def processing_method(self, k, method, type_stat=TYPE_LINE_WORD, binary_N=5):
+        self.coef = self.get_bold_coef_lines(method=method, binary_N=binary_N)
         self.style = []
         for i in range(len(self.coef)):
             self.style.append([])
-            if line:
+            if type_stat == TYPE_LINE_WORD:
                 mu = np.mean(self.coef[i])
                 sigma = np.std(self.coef[i])
                 for j in range(len(self.coef[i])):
-                    if k > mu:#+sigma:
+                    if k > mu+sigma:
                         self.style[-1].append(1)
-                    elif k < mu:#-sigma:
+                    elif k < mu-sigma:
                         self.style[-1].append(0)
                     elif self.coef[i][j] > k:
                         self.style[-1].append(0)
                     else:
                         self.style[-1].append(1)
-            else:
+            elif type_stat == TYPE_LINE:
+                for j in range(len(self.coef[i])):
+                    if k > mu:
+                        self.style[-1].append(1)
+                    else:
+                        self.style[-1].append(0)
+            elif type_stat == TYPE_WORD:
                 for j in range(len(self.coef[i])):
                     if self.coef[i][j] > k:
-                        stl = 0
+                        self.style[-1].append(0)
                     else:
-                        stl = 1
-                    self.style[-1].append(stl)
+                        self.style[-1].append(1)
 
     def imshow(self, binary=False):
         h = self.img.shape[0]
