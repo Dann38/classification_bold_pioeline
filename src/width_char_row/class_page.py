@@ -1,9 +1,15 @@
 import os
 import numpy as np
 import cv2
-import pytesseract
-from width_char_row.binarization import binarize
+from typing import List
+import pickle
 import time
+
+from width_char_row.bbox import BBox
+from width_char_row.text_detector import TextDetector
+from width_char_row.my_binar import binarize
+# from width_char_row.binarization import binarize
+
 OFFSET_ROW = 2
 BOLD_ROW = 1
 REGULAR_ROW = 0
@@ -12,7 +18,8 @@ WIDTH = 700
 COLOR_BOLD_ROW = (255, 0, 0)
 COLOR_OFFSET_ROW = (0, 0, 255)
 COLOR_REGULAR_ROW = (0, 255, 0)
-TEXT_IMG = 2
+TEXT_IMG = 1.2
+T_BINARY = 200
 
 
 class Pages:
@@ -22,32 +29,34 @@ class Pages:
         self.pages = []
         self.name_pages = []
         for f in files:
-            npy_path = os.path.join(imgs_path, f + ".npy")
-            if os.path.isfile(npy_path):
-                self.name_pages.append(f)
-                path_img = os.path.join(imgs_path, f)
-                self.pages.append(Page(path_img))
+            if f.split(".")[-1] in ["jpg", "png", "jpeg"]:
+                pkl_path = os.path.join(imgs_path, f + ".pkl")
+                if os.path.isfile(pkl_path):
+                    self.name_pages.append(f)
+                    path_img = os.path.join(imgs_path, f)
+                    self.pages.append(Page(path_img))
 
-    def test_method(self, method, k, print_rez=True):
+    def test_method(self, method, k, print_rez=True, is_line=False):
         N = len(self.pages)
-        count_row = 0
+        count_word = 0
         precision = 0
         recall = 0
         time_work = 0
         cpu_work_time = 0
         for i in range(N):
-            count_row_i_page = self.pages[i].get_count_row()
-            count_row += count_row_i_page
+            count_word_i_page = self.pages[i].count_word()
+            count_word += count_word_i_page
 
             start_time = time.time()
             cpu_start_time = time.process_time()
-            style_i_page = self.pages[i].get_type_rows(method=method, k=k)
+            self.pages[i].processing_method(method=method, k=k, line=is_line)
+            style_method = self.pages[i].style
             end_time = time.time()
             cpu_end_time = time.process_time()
 
-            estimation_i_page = self.pages[i].estimation(style_i_page)
-            precision += count_row_i_page*estimation_i_page["precision"]
-            recall += count_row_i_page*estimation_i_page["recall"]
+            estimation_i_page = self.pages[i].estimation(style_method)
+            precision += count_word_i_page*estimation_i_page["precision"]
+            recall += count_word_i_page*estimation_i_page["recall"]
 
             dt = end_time-start_time
             cpu_dt = cpu_end_time-cpu_start_time
@@ -62,109 +71,96 @@ class Pages:
                 print('================================================')
         if print_rez:
                 print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-                print(f"precision: {precision/count_row:.4f}")
-                print(f"recall: {recall/count_row:.4f}")
+                print(f"precision: {precision/count_word:.4f}")
+                print(f"recall: {recall/count_word:.4f}")
                 print(f"Время работы:{time_work:.4f} cек (CPU время:{cpu_work_time:.4f} сек)")
                 print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         rez = {
-            "precision": precision/count_row,
-            "recall": recall/count_row
+            "precision": precision/count_word,
+            "recall": recall/count_word
         }
         return rez
-
-    def test_proc_k(self, p, method="mean", print_rez=True):
-        coef = []
-        coef_pages = []
-        N = len(self.pages)
-        time_work = 0
-        cpu_work_time = 0
-        dt = []
-        cpu_dt = []
-        for i in range(N):
-            start_time = time.time()
-            cpu_start_time = time.process_time()
-
-            coef_i_page = self.pages[i].get_width_rows(method=method)
-
-            end_time = time.time()
-            cpu_end_time = time.process_time()
-            dt.append(end_time - start_time)
-            cpu_dt.append(cpu_end_time - cpu_start_time)
-            time_work += dt[-1]
-            cpu_work_time += cpu_dt[-1]
-
-            coef_pages.append(coef_i_page)
-            coef += coef_i_page
-
-        count_row = len(coef)
-        coef_rez = np.sort(coef)
-        index_k = round(p*count_row)-1
-        k = coef_rez[index_k]
-
-        precision = 0
-        recall = 0
-
-        for i in range(N):
-            count_row_i_page = len(coef_pages[i])
-            rez = np.array(coef_pages[i])
-            rez[rez < k] = 0
-            rez[rez >= k] = 1
-            style_i_page = self.pages[i].get_type_rows(1 - rez)
-            estimation_i_page = self.pages[i].estimation(style_i_page)
-            precision += count_row_i_page * estimation_i_page["precision"]
-            recall += count_row_i_page * estimation_i_page["recall"]
-            if print_rez:
-                print('================================================')
-                print(self.name_pages[i])
-                print(f"precision:{estimation_i_page['precision']:.4f}")
-                print(f"recall{estimation_i_page['recall']:.4f}")
-                print(f"Время работы:{dt[i]:.4f} cек (CPU время:{cpu_dt[i]:.4f} сек)")
-                print('================================================')
-        if print_rez:
-            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-            print(f"precision: {precision / count_row:.4f}")
-            print(f"recall: {recall / count_row:.4f}")
-            print(f"Время работы:{time_work:.4f} cек (CPU время:{cpu_work_time:.4f} сек)")
-            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-        rez = {
-            "k": k,
-            "precision": precision / count_row,
-            "recall": recall / count_row
-        }
-        return rez
+    #
+    # def test_proc_k(self, p, method="mean", print_rez=True):
+    #     coef = []
+    #     coef_pages = []
+    #     N = len(self.pages)
+    #     time_work = 0
+    #     cpu_work_time = 0
+    #     dt = []
+    #     cpu_dt = []
+    #     for i in range(N):
+    #         start_time = time.time()
+    #         cpu_start_time = time.process_time()
+    #
+    #         coef_i_page = self.pages[i].get_width_rows(method=method)
+    #
+    #         end_time = time.time()
+    #         cpu_end_time = time.process_time()
+    #         dt.append(end_time - start_time)
+    #         cpu_dt.append(cpu_end_time - cpu_start_time)
+    #         time_work += dt[-1]
+    #         cpu_work_time += cpu_dt[-1]
+    #
+    #         coef_pages.append(coef_i_page)
+    #         coef += coef_i_page
+    #
+    #     count_row = len(coef)
+    #     coef_rez = np.sort(coef)
+    #     index_k = round(p*count_row)-1
+    #     k = coef_rez[index_k]
+    #
+    #     precision = 0
+    #     recall = 0
+    #
+    #     for i in range(N):
+    #         count_row_i_page = len(coef_pages[i])
+    #         rez = np.array(coef_pages[i])
+    #         rez[rez < k] = 0
+    #         rez[rez >= k] = 1
+    #         style_i_page = self.pages[i].get_type_rows(1 - rez)
+    #         estimation_i_page = self.pages[i].estimation(style_i_page)
+    #         precision += count_row_i_page * estimation_i_page["precision"]
+    #         recall += count_row_i_page * estimation_i_page["recall"]
+    #         if print_rez:
+    #             print('================================================')
+    #             print(self.name_pages[i])
+    #             print(f"precision:{estimation_i_page['precision']:.4f}")
+    #             print(f"recall{estimation_i_page['recall']:.4f}")
+    #             print(f"Время работы:{dt[i]:.4f} cек (CPU время:{cpu_dt[i]:.4f} сек)")
+    #             print('================================================')
+    #     if print_rez:
+    #         print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+    #         print(f"precision: {precision / count_row:.4f}")
+    #         print(f"recall: {recall / count_row:.4f}")
+    #         print(f"Время работы:{time_work:.4f} cек (CPU время:{cpu_work_time:.4f} сек)")
+    #         print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+    #     rez = {
+    #         "k": k,
+    #         "precision": precision / count_row,
+    #         "recall": recall / count_row
+    #     }
+    #     return rez
 
 
 class Page:
-    def __init__(self, img_path: str, T_binary: int = 125):
-        npy_path = img_path + ".npy"
+    def __init__(self, img_path: str):
+        self.img_path = img_path
         self.img = self._read_img(img_path)
+
         # self.gray_img = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
-        self.gray_img = self._get_binary_img(T_binary)
-        self.exist_markup = True
+        # self.gray_img = self._get_binary_img(T_binary)
+        self.lines = []
+        self.style = []
+        self.coef = []
 
-        if os.path.isfile(npy_path):
-            with open(npy_path, 'rb') as f:
-                self.box = np.load(f).tolist()
-        else:
-            self.exist_markup = False
+        self._segmentation_lines()
 
-            box = pytesseract.image_to_data(self.gray_img, output_type=pytesseract.Output.DICT)
-            n_boxes = len(box["text"])
-            for i in range(n_boxes):
-                x0, y0, h0, w0 = int(box['left'][i]), int(box['top'][i]), int(box['height'][i]), int(box['width'][i])
-                if (box["level"][i] == 4) and (h0 > 5) and (w0 > 5):
-                    box.append([REGULAR_ROW, x0, y0, h0, w0])
-            self.box = np.array(box)
-
-    def get_count_row(self):
-        return len(self.box)
-
-    def _get_binary_img(self, T_binary: int):
-        binary_img = binarize(self.img)
-        binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
-        binary_img[binary_img < T_binary] = 0
-        binary_img[binary_img >= T_binary] = 1
-        return binary_img
+    def count_word(self):
+        rez = 0
+        for line in self.lines:
+            rez += len(line)
+        return rez
 
     def _read_img(self, name_file: str):
         """
@@ -176,48 +172,155 @@ class Page:
         img = cv2.imdecode(chunk_arr, cv2.IMREAD_COLOR)
         return img
 
-    def get_rows(self):
-        img_rows = self.get_images_row(img_type="brg")
-        gray_img_rows = self.get_images_row(img_type="binary")
-        rows = []
-        for i in range(len(img_rows)):
-            rows.append(Row(img_rows[i], gray_img_rows[i]))
-        return rows
+    def _segmentation_lines(self):
+        # HOT to use
+        '''
+        checkpoint_path = "путь до папки с весами для модели детекции"
+        image: np.ndarray
+        '''
 
-    def get_images_row(self, img_type="binary"):
-        images_row = []
-        if img_type == "brg":
-            img_ = self.img
-        elif img_type == "binary":
-            img_ = self.gray_img
+        pkl_path = self.img_path + ".pkl"
+        if os.path.exists(pkl_path):
+            self.load_segm()
+        else:
+            checkpoint_path = r"C:\Users\danii\Dropbox\Работа\03.Исходники_программ\веса"
+            # 3 - segmentation words into lines
 
-        for j in range(len(self.box)):
-            f, x1, y1, h1, w1 = self.box[j]
-            row = img_[y1:y1 + h1, x1:x1 + w1]
-            images_row.append(row)
-        return images_row
+            text_detector = TextDetector(on_gpu=False, checkpoint_path=checkpoint_path, with_vertical_text_detection=False,
+                                         config={})
+            # 2 - detect text
+            boxes, conf = text_detector.predict(self.img)
+            lines = text_detector.sort_bboxes_by_coordinates(boxes)
+            self.lines = self.union_lines(lines)
 
-    def get_width_rows(self, method="mean"):
-        rows = self.get_rows()
-        coef_rows = []
-        for i in range(len(rows)):
-            coef_rows.append(rows[i].get_width_char_row(method=method))
-        return coef_rows
+    def save_segm(self):
+        pkl_path = self.img_path + ".pkl"
+        with open(pkl_path, 'wb') as f:
+            dict_lines = [[box.to_dict() for box in line] for line in self.lines]
+            pickle.dump((dict_lines, self.style), f)
 
-    def get_type_rows(self, k, method="mean"):
-        coef = self.get_width_rows(method=method)
-        rez = np.array(coef)
-        rez[rez < k] = 0
-        rez[rez >= k] = 1
-        return 1-rez
+    def load_segm(self):
+        pkl_path = self.img_path + ".pkl"
+        with open(pkl_path, 'rb') as f:
+            (dict_lines, style) = pickle.load(f)
+        self.lines = [[BBox.from_dict(box) for box in line] for line in dict_lines]
+        self.style = style
 
-    def estimation(self, style):
-        x0 = np.array(self.box)[:, 0]
-        x1 = style + x0
-        bold_all = len(x0[x0 == 1])
-        regular_all = len(x0[x0 == 0])
-        bold_right = len(x1[x1 == 2])
-        regular_right = len(x1[x1 == 0])
+    @staticmethod
+    def union_lines(lines: List[List[BBox]]) -> List[List[BBox]]:
+        filtered_lines = []
+        one_id = 0
+        while one_id < len(lines) - 1:
+            one_line = lines[one_id]
+            two_line = lines[one_id + 1]
+            merge_line = one_line + two_line
+            min_h_one = min([box.y_bottom_right - box.y_top_left for box in one_line])
+            min_h_two = min([box.y_bottom_right - box.y_top_left for box in two_line])
+
+            one_bottom = max([box.y_bottom_right for box in one_line])
+            two_top = min([box.y_top_left for box in two_line])
+
+            interval_between_lines = two_top - one_bottom
+            if interval_between_lines < 0 or (min_h_one > min_h_two and interval_between_lines < min_h_two / 2):
+                union_line = sorted(merge_line, key=lambda x: x.x_top_left)
+                filtered_lines.append(union_line)
+                one_id += 2
+            else:
+                filtered_lines.append(one_line)
+                one_id += 1
+
+        return filtered_lines
+
+    def get_bold_coef_lines(self, method: str = "mean") -> List[List[float]]:
+        coef_bold = []
+        binary_img = binarize(self.img)
+        for line in self.lines:
+            coef_bold.append([])
+            for word in line:
+                width_char = WidthCharImage(binary_img[word.y_top_left:word.y_bottom_right,
+                                            word.x_top_left:word.x_bottom_right])
+                coef_bold[-1].append(width_char.get_width_char_row(method=method))
+        return coef_bold
+
+    def processing_method(self, k, method, line=False):
+        self.coef = self.get_bold_coef_lines(method=method)
+        self.style = []
+        for i in range(len(self.coef)):
+            self.style.append([])
+            if line:
+                mu = np.mean(self.coef[i])
+                sigma = np.std(self.coef[i])
+                for j in range(len(self.coef[i])):
+                    if k > mu:#+sigma:
+                        self.style[-1].append(1)
+                    elif k < mu:#-sigma:
+                        self.style[-1].append(0)
+                    elif self.coef[i][j] > k:
+                        self.style[-1].append(0)
+                    else:
+                        self.style[-1].append(1)
+            else:
+                for j in range(len(self.coef[i])):
+                    if self.coef[i][j] > k:
+                        stl = 0
+                    else:
+                        stl = 1
+                    self.style[-1].append(stl)
+
+    def imshow(self, binary=False):
+        h = self.img.shape[0]
+        w = self.img.shape[1]
+
+        if not binary:
+            img_cope = self.img.copy()
+        else:
+            img_cope = binarize(self.img)
+        coef = h / w
+        exist_style = len(self.style) != 0
+        exist_coef = len(self.coef) != 0
+        for i in range(len(self.lines)):
+            for j in range(len(self.lines[i])):
+                border = 1
+                word = self.lines[i][j]
+                color = (155, 155, 155)
+                info_word = ""
+                if exist_style:
+                    style_word = self.style[i][j]
+                    if exist_coef:
+                        info_word = self.coef[i][j]
+
+                    if style_word == BOLD_ROW:
+                        color = COLOR_BOLD_ROW
+                    elif style_word == OFFSET_ROW:
+                        color = COLOR_OFFSET_ROW
+                    elif style_word == REGULAR_ROW:
+                        color = COLOR_REGULAR_ROW
+                cv2.rectangle(img_cope, (word.x_top_left, word.y_top_left),
+                              (word.x_bottom_right, word.y_bottom_right), color, border)
+                cv2.putText(img_cope, f"{info_word:.2f}", (word.x_top_left, word.y_top_left),
+                            cv2.FONT_HERSHEY_COMPLEX, TEXT_IMG, color, 1)
+        img = cv2.resize(img_cope, (WIDTH, round(coef * WIDTH)))
+        cv2.imshow("img", img)
+        cv2.waitKey(0)
+
+    def estimation(self, style_method):
+        self.load_segm()
+        style_true = self.style
+        bold_all = 0
+        regular_all = 0
+        bold_right = 0
+        regular_right = 0
+        for i in range(len(style_true)):
+            for j in range(len(style_true[i])):
+                if style_true[i][j] == BOLD_ROW:
+                    bold_all += 1
+                    if style_method[i][j] == BOLD_ROW:
+                        bold_right += 1
+                elif style_true[i][j] == REGULAR_ROW:
+                    regular_all += 1
+                    if style_method[i][j] == REGULAR_ROW:
+                        regular_right += 1
+
         if bold_right+regular_all-regular_right == 0:
             precision = 0
         else:
@@ -225,50 +328,79 @@ class Page:
         if bold_all == 0:
             recall = 1
         else:
-            recall = min(1, bold_right/bold_all)
+            recall = min([1, bold_right/bold_all])
         rez = {
             "precision": precision,
             "recall": recall
         }
         return rez
 
-    def imshow_method(self, k, method):
-        coef = self.get_width_rows(method=method)
-        rez = np.array(coef)
-        rez[rez < k] = 0
-        rez[rez >= k] = 1
-        rez = 1-rez
-        self.imshow(rez, coef)
-
-    def imshow(self, style, info_rows=None):
-        h = self.img.shape[0]
-        w = self.img.shape[1]
-        img_cope = self.img.copy()
-        coef = h / w
-
-        for i in range(len(self.box)):
-            color = (155, 155, 155)
-            border = 1
-            font, x0, y0, h0, w0 = self.box[i]
-            if style[i] == BOLD_ROW:
-                color = COLOR_BOLD_ROW
-            elif style[i] == OFFSET_ROW:
-                color = COLOR_OFFSET_ROW
-            elif style[i] == REGULAR_ROW:
-                color = COLOR_REGULAR_ROW
-            cv2.rectangle(img_cope, (x0, y0), (x0 + w0, y0 + h0), color, border)
-            if info_rows is not None:
-                cv2.putText(img_cope, f"{info_rows[i]:.2f}", (x0, y0), cv2.FONT_HERSHEY_COMPLEX, TEXT_IMG, color, 1)
-        img = cv2.resize(img_cope, (WIDTH, round(coef * WIDTH)))
-        cv2.imshow("img", img)
-        cv2.waitKey(0)
 
 
-class Row:
-    def __init__(self, img, img_binary):
-        self.img = img
-        self.img_binary = img_binary
+
+    #
+    # def get_count_row(self):
+    #     return len(self.box)
+    #
+    # def _get_binary_img(self, T_binary: int):
+    #     binary_img = binarize(self.img)
+    #     binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
+    #     binary_img[binary_img < T_binary] = 0
+    #     binary_img[binary_img >= T_binary] = 1
+    #     return binary_img
+    #
+
+    #
+    # def get_rows(self):
+    #     img_rows = self.get_images_row(img_type="brg")
+    #     gray_img_rows = self.get_images_row(img_type="binary")
+    #     rows = []
+    #     for i in range(len(img_rows)):
+    #         rows.append(Row(img_rows[i], gray_img_rows[i]))
+    #     return rows
+    #
+    # def get_images_row(self, img_type="binary"):
+    #     images_row = []
+    #     if img_type == "brg":
+    #         img_ = self.img
+    #     elif img_type == "binary":
+    #         img_ = self.gray_img
+    #
+    #     for j in range(len(self.box)):
+    #         f, x1, y1, h1, w1 = self.box[j]
+    #         row = img_[y1:y1 + h1, x1:x1 + w1]
+    #         images_row.append(row)
+    #     return images_row
+    #
+    # def get_width_rows(self, method="mean"):
+    #     rows = self.get_rows()
+    #     coef_rows = []
+    #     for i in range(len(rows)):
+    #         coef_rows.append(rows[i].get_width_char_row(method=method))
+    #     return coef_rows
+    #
+    # def get_type_rows(self, k, method="mean"):
+    #     coef = self.get_width_rows(method=method)
+    #     rez = np.array(coef)
+    #     rez[rez < k] = 0
+    #     rez[rez >= k] = 1
+    #     return 1-rez
+    #
+
+
+
+class WidthCharImage:
+    def __init__(self, img_binary: np.ndarray):
+        # self.img = img
+        self.img_binary = img_binary # self._get_binary_img(T_BINARY)
         self.h_start, self.h_end, self.h = self._get_h_row()
+
+    def _get_binary_img(self, T_binary: int):
+        binary_img = binarize(self.img)
+        # binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
+        # binary_img[binary_img < T_binary] = 0
+        # binary_img[binary_img >= T_binary] = 1
+        return binary_img
 
     def _get_h_row(self, permissible_h: int = 5):
         h = self.img_binary.shape[0]
@@ -404,3 +536,5 @@ class Row:
                 break
 
         return width_char_
+
+
