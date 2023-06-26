@@ -248,11 +248,13 @@ class Page:
     def processing_method(self, k, method, type_stat=TYPE_LINE_WORD, binary_N=5):
         self.coef = self.get_bold_coef_lines(method=method, binary_N=binary_N)
         self.style = []
+
         for i in range(len(self.coef)):
+            mu = np.mean(self.coef[i])
+            sigma = np.std(self.coef[i])
             self.style.append([])
             if type_stat == TYPE_LINE_WORD:
-                mu = np.mean(self.coef[i])
-                sigma = np.std(self.coef[i])
+
                 for j in range(len(self.coef[i])):
                     if k > mu+sigma:
                         self.style[-1].append(1)
