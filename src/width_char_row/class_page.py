@@ -8,7 +8,8 @@ import time
 from width_char_row.bbox import BBox
 from width_char_row.text_detector import TextDetector
 from width_char_row.my_binar import binarize
-# from width_char_row.binarization import binarize
+
+INTENSITY_SPACE = 0.95
 
 OFFSET_ROW = 2
 BOLD_ROW = 1
@@ -83,67 +84,6 @@ class Pages:
             "recall": recall/count_word
         }
         return rez
-    #
-    # def test_proc_k(self, p, method="mean", print_rez=True):
-    #     coef = []
-    #     coef_pages = []
-    #     N = len(self.pages)
-    #     time_work = 0
-    #     cpu_work_time = 0
-    #     dt = []
-    #     cpu_dt = []
-    #     for i in range(N):
-    #         start_time = time.time()
-    #         cpu_start_time = time.process_time()
-    #
-    #         coef_i_page = self.pages[i].get_width_rows(method=method)
-    #
-    #         end_time = time.time()
-    #         cpu_end_time = time.process_time()
-    #         dt.append(end_time - start_time)
-    #         cpu_dt.append(cpu_end_time - cpu_start_time)
-    #         time_work += dt[-1]
-    #         cpu_work_time += cpu_dt[-1]
-    #
-    #         coef_pages.append(coef_i_page)
-    #         coef += coef_i_page
-    #
-    #     count_row = len(coef)
-    #     coef_rez = np.sort(coef)
-    #     index_k = round(p*count_row)-1
-    #     k = coef_rez[index_k]
-    #
-    #     precision = 0
-    #     recall = 0
-    #
-    #     for i in range(N):
-    #         count_row_i_page = len(coef_pages[i])
-    #         rez = np.array(coef_pages[i])
-    #         rez[rez < k] = 0
-    #         rez[rez >= k] = 1
-    #         style_i_page = self.pages[i].get_type_rows(1 - rez)
-    #         estimation_i_page = self.pages[i].estimation(style_i_page)
-    #         precision += count_row_i_page * estimation_i_page["precision"]
-    #         recall += count_row_i_page * estimation_i_page["recall"]
-    #         if print_rez:
-    #             print('================================================')
-    #             print(self.name_pages[i])
-    #             print(f"precision:{estimation_i_page['precision']:.4f}")
-    #             print(f"recall{estimation_i_page['recall']:.4f}")
-    #             print(f"Время работы:{dt[i]:.4f} cек (CPU время:{cpu_dt[i]:.4f} сек)")
-    #             print('================================================')
-    #     if print_rez:
-    #         print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-    #         print(f"precision: {precision / count_row:.4f}")
-    #         print(f"recall: {recall / count_row:.4f}")
-    #         print(f"Время работы:{time_work:.4f} cек (CPU время:{cpu_work_time:.4f} сек)")
-    #         print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-    #     rez = {
-    #         "k": k,
-    #         "precision": precision / count_row,
-    #         "recall": recall / count_row
-    #     }
-    #     return rez
 
 
 class Page:
@@ -151,8 +91,6 @@ class Page:
         self.img_path = img_path
         self.img = self._read_img(img_path)
 
-        # self.gray_img = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
-        # self.gray_img = self._get_binary_img(T_binary)
         self.lines = []
         self.style = []
         self.coef = []
@@ -245,8 +183,7 @@ class Page:
                 coef_bold[-1].append(width_char.get_width_char_row(method=method))
         return coef_bold
 
-    def processing_method(self, k, method, type_stat=TYPE_LINE_WORD, binary_N=5):
-        self.coef = self.get_bold_coef_lines(method=method, binary_N=binary_N)
+    def clusterization(self, type_stat, k):
         self.style = []
 
         for i in range(len(self.coef)):
@@ -256,9 +193,9 @@ class Page:
             if type_stat == TYPE_LINE_WORD:
 
                 for j in range(len(self.coef[i])):
-                    if k > mu+sigma:
+                    if k > mu + sigma:
                         self.style[-1].append(1)
-                    elif k < mu-sigma:
+                    elif k < mu - sigma:
                         self.style[-1].append(0)
                     elif self.coef[i][j] > k:
                         self.style[-1].append(0)
@@ -276,6 +213,10 @@ class Page:
                         self.style[-1].append(0)
                     else:
                         self.style[-1].append(1)
+
+    def processing_method(self, k, method, type_stat=TYPE_LINE_WORD, binary_N=5):
+        self.coef = self.get_bold_coef_lines(method=method, binary_N=binary_N)
+        self.clusterization(type_stat, k)
 
     def imshow(self, binary=False):
         h = self.img.shape[0]
@@ -346,71 +287,10 @@ class Page:
         return rez
 
 
-
-
-    #
-    # def get_count_row(self):
-    #     return len(self.box)
-    #
-    # def _get_binary_img(self, T_binary: int):
-    #     binary_img = binarize(self.img)
-    #     binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
-    #     binary_img[binary_img < T_binary] = 0
-    #     binary_img[binary_img >= T_binary] = 1
-    #     return binary_img
-    #
-
-    #
-    # def get_rows(self):
-    #     img_rows = self.get_images_row(img_type="brg")
-    #     gray_img_rows = self.get_images_row(img_type="binary")
-    #     rows = []
-    #     for i in range(len(img_rows)):
-    #         rows.append(Row(img_rows[i], gray_img_rows[i]))
-    #     return rows
-    #
-    # def get_images_row(self, img_type="binary"):
-    #     images_row = []
-    #     if img_type == "brg":
-    #         img_ = self.img
-    #     elif img_type == "binary":
-    #         img_ = self.gray_img
-    #
-    #     for j in range(len(self.box)):
-    #         f, x1, y1, h1, w1 = self.box[j]
-    #         row = img_[y1:y1 + h1, x1:x1 + w1]
-    #         images_row.append(row)
-    #     return images_row
-    #
-    # def get_width_rows(self, method="mean"):
-    #     rows = self.get_rows()
-    #     coef_rows = []
-    #     for i in range(len(rows)):
-    #         coef_rows.append(rows[i].get_width_char_row(method=method))
-    #     return coef_rows
-    #
-    # def get_type_rows(self, k, method="mean"):
-    #     coef = self.get_width_rows(method=method)
-    #     rez = np.array(coef)
-    #     rez[rez < k] = 0
-    #     rez[rez >= k] = 1
-    #     return 1-rez
-    #
-
-
-
 class WidthCharImage:
     def __init__(self, img_binary: np.ndarray):
-        # self.img = img
-        self.img_binary = img_binary # self._get_binary_img(T_BINARY)
+        self.img_binary = img_binary
         self.h_start, self.h_end, self.h = self._get_h_row()
-
-    def _get_binary_img(self, T_binary: int):
-        binary_img = binarize(self.img)
-        # binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
-        # binary_img[binary_img < T_binary] = 0
-        # binary_img[binary_img >= T_binary] = 1
-        return binary_img
 
     def _get_h_row(self, permissible_h: int = 5):
         h = self.img_binary.shape[0]
@@ -439,112 +319,27 @@ class WidthCharImage:
 
         return h_min, h_max, h
 
-    def get_h_row(self, binary=True):
+    def get_base_line(self, binary=True) -> np.ndarray:
         if binary:
             return self.img_binary[self.h_start:self.h_end + 1, :]
         else:
             return self.img[self.h_start:self.h_end + 1, :, :]
 
-    def get_width_char_row(self, method="mean"):
+    def get_width_char_row(self, method="mean") -> float:
         if method == "mean":
-            img_chars = self.get_h_row()
+            img_chars = self.get_base_line()
             x = img_chars.mean(0)
             x[1:-1] = 1/3*(x[1:-1] + x[:-2] + x[2:])
-            img_chars_without_space = img_chars[:, x < 0.95]
+            img_chars_without_space = img_chars[:, x < INTENSITY_SPACE]
             return img_chars_without_space.mean()
 
-        elif method == "sq":
-            img_chars = self.get_h_row()
-            rez_sq = self._sq(img_chars, 6)
-            if rez_sq is None:
-                rez_sq = 0
-            return rez_sq
-
         elif method == "ps":
-            img_chars = self.get_h_row()
+            img_chars = self.get_base_line()
             x = img_chars.mean(0)
-            img_chars_without_space = img_chars[:, x < 0.95]
+            img_chars_without_space = img_chars[:, x < INTENSITY_SPACE]
             hw = img_chars_without_space.shape[0]*img_chars_without_space.shape[1]
             p_img = img_chars[:, :-1] - img_chars[:, 1:]
             p_img[p_img > 0] = 1
             p = p_img.sum()
             s = hw-img_chars_without_space.sum()
             return p/s
-
-    def _sq(self, img, count_line):
-        delta_h = self.h / (count_line + 1)
-        if img is None:
-            return 0
-        if count_line > self.h:
-            count_line = round(self.h / 3)
-        rez_w = []
-        rez_cord = []
-        for i in range(count_line):
-            width_sq_line_i, cord_sq_line_i = self._sq_one_line(img, round(delta_h*(i+1)))
-            rez_w = rez_w + width_sq_line_i
-            rez_cord = rez_cord + cord_sq_line_i
-
-        while True:
-            if len(rez_w) == 0:
-                return None
-            index_max = np.argmax(rez_w)
-            r = (np.max(rez_w)-1)/2
-            y0, x0 = rez_cord[index_max]
-            y1 = round(y0-r/1.44)
-            y2 = round(y0+r/1.44)
-            x1 = round(x0-r/1.44)
-            x2 = round(x0+r/1.44)
-            if y2 >= self.h or y1 < 0 or x2 >= img.shape[1] or x1 < 0:
-                rez_w.pop(index_max)
-                rez_cord.pop(index_max)
-            elif img[y1, x1] == 1 or img[y1, x2] == 1 or img[y2, x1] == 1 or img[y2, x2] == 1:
-                rez_w.pop(index_max)
-                rez_cord.pop(index_max)
-            else:
-                return (r*2+1)/self.h
-
-    def _sq_one_line(self, img, i_line):
-        x = img[i_line, :]
-        width_sq_line = []
-        cord_sq_line = []
-        is_border = True
-        width_char = 0
-        for i in range(len(x)):
-            if img[i_line, i] == 0:
-                if is_border:
-                    is_border = False
-                width_char += 1
-            else:
-                if not is_border:
-                    is_border = True
-                    center_cord_char = i - round(width_char/2)
-                    width_char = self._one_sq_size(img, i_line, center_cord_char, width_char)
-                    width_sq_line.append(width_char)
-                    cord_sq_line.append([i_line, center_cord_char])
-                    width_char = 0
-
-        return width_sq_line, cord_sq_line
-
-    def _one_sq_size(self, img, i, j, w):
-        k = 0
-        width_char_ = 0
-        while img[i+k, j] != 1:
-            width_char_ += 1
-            k += 1
-            if width_char_ > w:
-                return w
-            if i+k >= img.shape[0]:
-                break
-        k = 0
-        width_char_ -= 1
-        while img[i-k, j] != 1:
-            width_char_ += 1
-            k += 1
-            if width_char_ > w:
-                return w
-            if i-k <= 0:
-                break
-
-        return width_char_
-
-
