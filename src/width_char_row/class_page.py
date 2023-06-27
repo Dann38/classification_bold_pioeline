@@ -7,7 +7,7 @@ import time
 
 from width_char_row.bbox import BBox
 from width_char_row.text_detector import TextDetector
-from width_char_row.bold_classifier import PsBoldClassifier, TYPE_LINE, TYPE_WORD, TYPE_LINE_WORD
+from width_char_row.bold_classifier import PsBoldClassifier, MeanBoldClassifier, TYPE_LINE, TYPE_WORD, TYPE_LINE_WORD
 from width_char_row.my_binar import binarize
 
 OFFSET_ROW = 2
@@ -173,6 +173,10 @@ class Page:
             ps_classifier = PsBoldClassifier(k, type_stat)
             self.style = ps_classifier.classify(self.img, self.lines)
             self.coef = ps_classifier.get_lines_estimates(self.img, self.lines)
+        elif method == "mean":
+            ps_classifier = MeanBoldClassifier(k, type_stat)
+            self.style = ps_classifier.classify(self.img, self.lines)
+            self.coef = ps_classifier.get_lines_estimates(self.img, self.lines)
         else:
             pass
 
@@ -246,152 +250,152 @@ class Page:
 
 
 
-class WidthCharImage:
-    def __init__(self, img_binary: np.ndarray):
-        # self.img = img
-        self.img_binary = img_binary # self._get_binary_img(T_BINARY)
-        self.h_start, self.h_end, self.h = self._get_h_row()
-
-    def _get_binary_img(self, T_binary: int):
-        binary_img = binarize(self.img)
-        # binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
-        # binary_img[binary_img < T_binary] = 0
-        # binary_img[binary_img >= T_binary] = 1
-        return binary_img
-
-    def _get_h_row(self, permissible_h: int = 5):
-        h = self.img_binary.shape[0]
-        if h < permissible_h:
-            return None
-        mean_ = self.img_binary.mean(1)
-        dmean = abs(mean_[:-1] - mean_[1:])
-
-        max1 = 0
-        max2 = 0
-        argmax1 = 0
-        argmax2 = 0
-        for i in range(len(dmean)):
-            if dmean[i] > max2:
-                if dmean[i] > max1:
-                    max2 = max1
-                    argmax2 = argmax1
-                    max1 = dmean[i]
-                    argmax1 = i
-                else:
-                    max2 = dmean[i]
-                    argmax2 = i
-        h_min = min(argmax1, argmax2)
-        h_max = max(argmax1, argmax2)
-        h = h_max - h_min + 1
-
-        return h_min, h_max, h
-
-    def get_h_row(self, binary=True):
-        if binary:
-            return self.img_binary[self.h_start:self.h_end + 1, :]
-        else:
-            return self.img[self.h_start:self.h_end + 1, :, :]
-
-    def get_width_char_row(self, method="mean"):
-        if method == "mean":
-            img_chars = self.get_h_row()
-            x = img_chars.mean(0)
-            x[1:-1] = 1/3*(x[1:-1] + x[:-2] + x[2:])
-            img_chars_without_space = img_chars[:, x < 0.95]
-            return img_chars_without_space.mean()
-
-        elif method == "sq":
-            img_chars = self.get_h_row()
-            rez_sq = self._sq(img_chars, 6)
-            if rez_sq is None:
-                rez_sq = 0
-            return rez_sq
-
-        elif method == "ps":
-            img_chars = self.get_h_row()
-            x = img_chars.mean(0)
-            img_chars_without_space = img_chars[:, x < 0.95]
-            hw = img_chars_without_space.shape[0]*img_chars_without_space.shape[1]
-            p_img = img_chars[:, :-1] - img_chars[:, 1:]
-            p_img[p_img > 0] = 1
-            p = p_img.sum()
-            s = hw-img_chars_without_space.sum()
-            return p/s
-
-    def _sq(self, img, count_line):
-        delta_h = self.h / (count_line + 1)
-        if img is None:
-            return 0
-        if count_line > self.h:
-            count_line = round(self.h / 3)
-        rez_w = []
-        rez_cord = []
-        for i in range(count_line):
-            width_sq_line_i, cord_sq_line_i = self._sq_one_line(img, round(delta_h*(i+1)))
-            rez_w = rez_w + width_sq_line_i
-            rez_cord = rez_cord + cord_sq_line_i
-
-        while True:
-            if len(rez_w) == 0:
-                return None
-            index_max = np.argmax(rez_w)
-            r = (np.max(rez_w)-1)/2
-            y0, x0 = rez_cord[index_max]
-            y1 = round(y0-r/1.44)
-            y2 = round(y0+r/1.44)
-            x1 = round(x0-r/1.44)
-            x2 = round(x0+r/1.44)
-            if y2 >= self.h or y1 < 0 or x2 >= img.shape[1] or x1 < 0:
-                rez_w.pop(index_max)
-                rez_cord.pop(index_max)
-            elif img[y1, x1] == 1 or img[y1, x2] == 1 or img[y2, x1] == 1 or img[y2, x2] == 1:
-                rez_w.pop(index_max)
-                rez_cord.pop(index_max)
-            else:
-                return (r*2+1)/self.h
-
-    def _sq_one_line(self, img, i_line):
-        x = img[i_line, :]
-        width_sq_line = []
-        cord_sq_line = []
-        is_border = True
-        width_char = 0
-        for i in range(len(x)):
-            if img[i_line, i] == 0:
-                if is_border:
-                    is_border = False
-                width_char += 1
-            else:
-                if not is_border:
-                    is_border = True
-                    center_cord_char = i - round(width_char/2)
-                    width_char = self._one_sq_size(img, i_line, center_cord_char, width_char)
-                    width_sq_line.append(width_char)
-                    cord_sq_line.append([i_line, center_cord_char])
-                    width_char = 0
-
-        return width_sq_line, cord_sq_line
-
-    def _one_sq_size(self, img, i, j, w):
-        k = 0
-        width_char_ = 0
-        while img[i+k, j] != 1:
-            width_char_ += 1
-            k += 1
-            if width_char_ > w:
-                return w
-            if i+k >= img.shape[0]:
-                break
-        k = 0
-        width_char_ -= 1
-        while img[i-k, j] != 1:
-            width_char_ += 1
-            k += 1
-            if width_char_ > w:
-                return w
-            if i-k <= 0:
-                break
-
-        return width_char_
+# class WidthCharImage:
+#     def __init__(self, img_binary: np.ndarray):
+#         # self.img = img
+#         self.img_binary = img_binary # self._get_binary_img(T_BINARY)
+#         self.h_start, self.h_end, self.h = self._get_h_row()
+#
+#     def _get_binary_img(self, T_binary: int):
+#         binary_img = binarize(self.img)
+#         # binary_img = cv2.cvtColor(binary_img, cv2.COLOR_BGR2GRAY)
+#         # binary_img[binary_img < T_binary] = 0
+#         # binary_img[binary_img >= T_binary] = 1
+#         return binary_img
+#
+#     def _get_h_row(self, permissible_h: int = 5):
+#         h = self.img_binary.shape[0]
+#         if h < permissible_h:
+#             return None
+#         mean_ = self.img_binary.mean(1)
+#         dmean = abs(mean_[:-1] - mean_[1:])
+#
+#         max1 = 0
+#         max2 = 0
+#         argmax1 = 0
+#         argmax2 = 0
+#         for i in range(len(dmean)):
+#             if dmean[i] > max2:
+#                 if dmean[i] > max1:
+#                     max2 = max1
+#                     argmax2 = argmax1
+#                     max1 = dmean[i]
+#                     argmax1 = i
+#                 else:
+#                     max2 = dmean[i]
+#                     argmax2 = i
+#         h_min = min(argmax1, argmax2)
+#         h_max = max(argmax1, argmax2)
+#         h = h_max - h_min + 1
+#
+#         return h_min, h_max, h
+#
+#     def get_h_row(self, binary=True):
+#         if binary:
+#             return self.img_binary[self.h_start:self.h_end + 1, :]
+#         else:
+#             return self.img[self.h_start:self.h_end + 1, :, :]
+#
+#     def get_width_char_row(self, method="mean"):
+#         if method == "mean":
+#             img_chars = self.get_h_row()
+#             x = img_chars.mean(0)
+#             x[1:-1] = 1/3*(x[1:-1] + x[:-2] + x[2:])
+#             img_chars_without_space = img_chars[:, x < 0.95]
+#             return img_chars_without_space.mean()
+#
+#         elif method == "sq":
+#             img_chars = self.get_h_row()
+#             rez_sq = self._sq(img_chars, 6)
+#             if rez_sq is None:
+#                 rez_sq = 0
+#             return rez_sq
+#
+#         elif method == "ps":
+#             img_chars = self.get_h_row()
+#             x = img_chars.mean(0)
+#             img_chars_without_space = img_chars[:, x < 0.95]
+#             hw = img_chars_without_space.shape[0]*img_chars_without_space.shape[1]
+#             p_img = img_chars[:, :-1] - img_chars[:, 1:]
+#             p_img[p_img > 0] = 1
+#             p = p_img.sum()
+#             s = hw-img_chars_without_space.sum()
+#             return p/s
+#
+#     def _sq(self, img, count_line):
+#         delta_h = self.h / (count_line + 1)
+#         if img is None:
+#             return 0
+#         if count_line > self.h:
+#             count_line = round(self.h / 3)
+#         rez_w = []
+#         rez_cord = []
+#         for i in range(count_line):
+#             width_sq_line_i, cord_sq_line_i = self._sq_one_line(img, round(delta_h*(i+1)))
+#             rez_w = rez_w + width_sq_line_i
+#             rez_cord = rez_cord + cord_sq_line_i
+#
+#         while True:
+#             if len(rez_w) == 0:
+#                 return None
+#             index_max = np.argmax(rez_w)
+#             r = (np.max(rez_w)-1)/2
+#             y0, x0 = rez_cord[index_max]
+#             y1 = round(y0-r/1.44)
+#             y2 = round(y0+r/1.44)
+#             x1 = round(x0-r/1.44)
+#             x2 = round(x0+r/1.44)
+#             if y2 >= self.h or y1 < 0 or x2 >= img.shape[1] or x1 < 0:
+#                 rez_w.pop(index_max)
+#                 rez_cord.pop(index_max)
+#             elif img[y1, x1] == 1 or img[y1, x2] == 1 or img[y2, x1] == 1 or img[y2, x2] == 1:
+#                 rez_w.pop(index_max)
+#                 rez_cord.pop(index_max)
+#             else:
+#                 return (r*2+1)/self.h
+#
+#     def _sq_one_line(self, img, i_line):
+#         x = img[i_line, :]
+#         width_sq_line = []
+#         cord_sq_line = []
+#         is_border = True
+#         width_char = 0
+#         for i in range(len(x)):
+#             if img[i_line, i] == 0:
+#                 if is_border:
+#                     is_border = False
+#                 width_char += 1
+#             else:
+#                 if not is_border:
+#                     is_border = True
+#                     center_cord_char = i - round(width_char/2)
+#                     width_char = self._one_sq_size(img, i_line, center_cord_char, width_char)
+#                     width_sq_line.append(width_char)
+#                     cord_sq_line.append([i_line, center_cord_char])
+#                     width_char = 0
+#
+#         return width_sq_line, cord_sq_line
+#
+#     def _one_sq_size(self, img, i, j, w):
+#         k = 0
+#         width_char_ = 0
+#         while img[i+k, j] != 1:
+#             width_char_ += 1
+#             k += 1
+#             if width_char_ > w:
+#                 return w
+#             if i+k >= img.shape[0]:
+#                 break
+#         k = 0
+#         width_char_ -= 1
+#         while img[i-k, j] != 1:
+#             width_char_ += 1
+#             k += 1
+#             if width_char_ > w:
+#                 return w
+#             if i-k <= 0:
+#                 break
+#
+#         return width_char_
 
 

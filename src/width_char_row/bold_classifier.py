@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List
 from width_char_row.bbox import BBox
 import numpy as np
+import cv2
 from width_char_row.my_binar import binarize
 
 BINARIZE_N = 5
@@ -135,5 +136,49 @@ class PsBoldClassifier(BaseBoldClassifier):
         s = hw - image_s.sum()
         return p / s
 
+
+class MeanBoldClassifier(BaseBoldClassifier):
+    def __init__(self, k0, type_stat):
+        self.k0 = k0
+        self.type_stat = type_stat
+
+    def preprocessing(self, image: np.ndarray) -> np.ndarray:
+        return binarize(image, BINARIZE_N)
+
+    def clasterization(self, lines_estimates: List[List[float]]) -> List[List[float]]:
+        lines_bold_indicators = []
+
+        for i in range(len(lines_estimates)):
+            mu = np.mean(lines_estimates[i])
+            sigma = np.std(lines_estimates[i])
+            lines_bold_indicators.append([])
+            if self.type_stat == TYPE_LINE_WORD:
+                for j in range(len(lines_estimates[i])):
+                    if self.k0 > mu + sigma:
+                        lines_bold_indicators[-1].append(BOLD)
+                    elif self.k0 < mu - sigma:
+                        lines_bold_indicators[-1].append(REGULAR)
+                    elif lines_estimates[i][j] > self.k0:
+                        lines_bold_indicators[-1].append(REGULAR)
+                    else:
+                        lines_bold_indicators[-1].append(BOLD)
+            elif self.type_stat == TYPE_LINE:
+                for j in range(len(lines_estimates[i])):
+                    if self.k0 > mu:
+                        lines_bold_indicators[-1].append(BOLD)
+                    else:
+                        lines_bold_indicators[-1].append(REGULAR)
+            elif self.type_stat == TYPE_WORD:
+                for j in range(len(lines_estimates[i])):
+                    if lines_estimates[i][j] > self.k0:
+                        lines_bold_indicators[-1].append(REGULAR)
+                    else:
+                        lines_bold_indicators[-1].append(BOLD)
+        return lines_bold_indicators
+
+    def evaluation_method(self, image: np.ndarray) -> float:
+        bl_image = self.base_line_image(image)
+        image_s = self.get_rid_spaces(bl_image)
+        return image_s.mean()
 
 
