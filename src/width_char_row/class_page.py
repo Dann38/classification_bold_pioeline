@@ -7,8 +7,10 @@ import time
 
 from width_char_row.bbox import BBox
 from width_char_row.text_detector import TextDetector
-from width_char_row.bold_classifier import PsBoldClassifier, MeanBoldClassifier, TYPE_LINE, TYPE_WORD, TYPE_LINE_WORD
-from width_char_row.my_binar import binarize
+
+from width_char_row.bold_classifier.clasterization_bold_classifier import TYPE_LINE, TYPE_WORD, TYPE_LINE_WORD
+from width_char_row.bold_classifier import PsBoldClassifier, MeanBoldClassifier
+
 
 OFFSET_ROW = 2
 BOLD_ROW = 1
@@ -49,7 +51,7 @@ class Pages:
 
             start_time = time.time()
             cpu_start_time = time.process_time()
-            self.pages[i].processing_method(method=method, k=k, type_stat=type_stat, binary_N=binary_N)
+            self.pages[i].processing_method(method=method, k=k, type_stat=type_stat)
             style_method = self.pages[i].style
             end_time = time.time()
             cpu_end_time = time.process_time()
@@ -180,14 +182,12 @@ class Page:
         else:
             pass
 
-    def imshow(self, binary=False):
+    def imshow(self):
         h = self.img.shape[0]
         w = self.img.shape[1]
 
-        if not binary:
-            img_cope = self.img.copy()
-        else:
-            img_cope = binarize(self.img)
+        img_cope = self.img.copy()
+
         coef = h / w
         exist_style = len(self.style) != 0
         exist_coef = len(self.coef) != 0
